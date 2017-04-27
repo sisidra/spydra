@@ -46,17 +46,22 @@ public class GcpUtils {
   public String credentialJsonFromEnv() throws IOException {
     String jsonFile = jsonCredentialPath();
     if (jsonFile == null || !Files.exists(Paths.get(jsonFile))) {
-      throw new IllegalArgumentException(
-          "GOOGLE_APPLICATION_CREDENTIALS needs to be set and point to a valid credential json");
+      return null;
     }
     return new String(Files.readAllBytes(Paths.get(jsonFile)));
   }
 
   public String projectFromJsonCredential(String json) {
+    if (json == null) {
+      return null;
+    }
     return JsonPath.read(json, "$.project_id");
   }
 
   public String userIdFromJsonCredential(String json) {
+    if (json == null) {
+      return null;
+    }
     return JsonPath.read(json, "$.client_email");
   }
 
