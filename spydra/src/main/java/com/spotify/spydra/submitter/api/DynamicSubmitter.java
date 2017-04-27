@@ -203,10 +203,14 @@ public class DynamicSubmitter extends Submitter {
     String path = arguments.clusterProperties()
         .getProperty("mapred:mapreduce.jobhistory.intermediate-done-dir");
     URI uri = URI.create(path);
-    FileSystem fs = gcpUtils.fileSystemForUri(uri);
+
+    bool useGsutil = true;
+
+    FilesystemWrapper fs = new FilesystemWrapper(uri, useGsutil);
+
     LOGGER.info("Waiting for history files to be moved to its final location");
-    while (fs.getContentSummary(new Path(uri)).getFileCount() != 0) {
-      LOGGER.info("Not yet moved files were encountered. Sleeping 1 second.");
+    while (! fs.filesExist(uri)) {
+      LOGGER.info("No moved history files were yet encountered. Sleeping 1 second.");
       try {
         long now = System.currentTimeMillis();
         if (now - start > TimeUnit.SECONDS.toMillis(timeoutSeconds)) {
