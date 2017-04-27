@@ -34,6 +34,10 @@ import java.util.UUID;
 
 import static java.lang.Integer.min;
 
+//Max length of a dataproc job id
+//Specs say 100, but there have been suspicions of issues with >88
+public static final int DATAPROC_MAX_JOBID_LENGTH = 88;
+
 public class SubmissionCliParser implements CliParser<SpydraArgument> {
   final static String CMD_NAME = "submit";
   private final static Options options = new Options();
@@ -118,9 +122,8 @@ public class SubmissionCliParser implements CliParser<SpydraArgument> {
 
     String uuid = UUID.randomUUID().toString();
 
-    //Limit size so that id with uuid is max 88 characters
-    //Specs say 100, but Google suspect they have issues >88
-    int maxLength = min(88 - uuid.length() - 1, jobID.length());
+    //Trim id down so it fits in the max length after appending a job-id (and an underscore)
+    int maxLength = min(DATAPROC_MAX_JOBID_LENGTH - uuid.length() - 1, jobID.length());
     jobID = jobID.substring(0, maxLength);
 
     //Remove all non-allowed characters
