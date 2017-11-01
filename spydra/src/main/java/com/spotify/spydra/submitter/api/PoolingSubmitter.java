@@ -17,10 +17,15 @@
 
 package com.spotify.spydra.submitter.api;
 
+import static com.spotify.spydra.model.SpydraArgument.OPTIONS_FILTER_LABEL_PREFIX;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableMap;
 import com.spotify.spydra.api.DataprocAPI;
 import com.spotify.spydra.api.model.Cluster;
 import com.spotify.spydra.model.SpydraArgument;
 
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +41,9 @@ public class PoolingSubmitter extends DynamicSubmitter {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(DynamicSubmitter.class);
 
+  @VisibleForTesting
+  static final String POOLED_CLUSTER_CLIENTID_LABEL = "spydra-cluster-pool-id";
+
   public PoolingSubmitter() {
     super();
   }
@@ -45,14 +53,6 @@ public class PoolingSubmitter extends DynamicSubmitter {
   }
 
   static final class Conditions {
-
-    static boolean isSpydraCluster(Cluster c) {
-      return c.clusterName.startsWith("spydra-");
-    }
-
-    static boolean isRunning(Cluster c) {
-      return c.status.state.equals("RUNNING");
-    }
 
     static boolean isYoung(Cluster c, SpydraArgument arguments) {
       return c.status.stateStartTime.plus(arguments.getPooling().getMaxAge())
@@ -77,16 +77,22 @@ public class PoolingSubmitter extends DynamicSubmitter {
   public boolean acquireCluster(SpydraArgument arguments, DataprocAPI dataprocAPI)
       throws IOException {
     try {
-      Collection<Cluster> clusters = dataprocAPI.listClusters(arguments);
+      //Have API filter on clusters that are active, are spydra clusters, and belong to the right pool
+      Map<String, String> clusterFilter = ImmutableMap.of(
+          "status.state", "ACTIVE",
+          OPTIONS_FILTER_LABEL_PREFIX + SPYDRA_CLUSTER_LABEL, "",
+          OPTIONS_FILTER_LABEL_PREFIX + POOLED_CLUSTER_CLIENTID_LABEL, arguments.getClientId()
+      );
+      Collection<Cluster> clusters = dataprocAPI.listClusters(arguments, clusterFilter);
       LOGGER.info(
-          String.format("Found %d clusters, finding suitable cluster to pool on", clusters.size()));
+          String.format("Found %d clusters in pool, finding suitable cluster to pool on", clusters.size()));
       List<Cluster> filteredClusters = clusters.stream()
-          .filter(Conditions::isSpydraCluster)
-          .filter(Conditions::isRunning)
           .filter(c -> Conditions.isYoung(c, arguments))
           .collect(Collectors.toList());
+      LOGGER.info(
+          String.format("After filtering conditions, %d cluster(s) remain", filteredClusters.size()));
       if (Conditions.mayCreateMoreClusters(filteredClusters, arguments)) {
-        return createNewCluster(arguments, dataprocAPI);
+        return newPooledCluster(arguments, dataprocAPI);
       } else {
         //TODO: TW do a weighted sample on metrics instead.
         Collections.shuffle(filteredClusters);
@@ -99,8 +105,17 @@ public class PoolingSubmitter extends DynamicSubmitter {
     }
 
     // All has failed us - try to create a cluster the good 'ol fashioned way.
+    return newPooledCluster(arguments, dataprocAPI);
+  }
+
+  private boolean newPooledCluster(SpydraArgument arguments, DataprocAPI dataprocAPI)
+      throws IOException {
+    // Label the pooled cluster with the client id. Unknown client ids all end up in their own pool.
+    arguments.addOption(arguments.cluster.options, SpydraArgument.OPTION_LABELS,
+        POOLED_CLUSTER_CLIENTID_LABEL + "=" + arguments.getClientId());
     return super.acquireCluster(arguments, dataprocAPI);
   }
+
 
   @Override
   public boolean releaseCluster(SpydraArgument arguments, DataprocAPI dataprocAPI)
